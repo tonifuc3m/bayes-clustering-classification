@@ -1,0 +1,1097 @@
+---
+title: "Bayesian Learning - Assignment 3"
+author: 
+- Antonio Miranda Escalada
+- Manuel Rodríguez Ramírez
+- Sergio Arias Pedraza
+date: March 30, 2019
+output:
+  html_document:
+    theme: readable
+    highlight: default
+    toc: true
+    toc_depth: 2
+    number_sections: false
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+---
+
+<br />
+
+# 0. Required packages
+
+```{r load_packages, echo=FALSE, message=FALSE, results='hide'}
+packages_needed<-c("MCMCglmm", "mixAK", "kernlab", "dplyr", "MASS", "caret", "Zelig", "MCMCpack", "e1071", "factoextra", "base", "VGAM")
+#install.packages(packages_needed)
+lapply(packages_needed, require, character.only = TRUE)
+```
+
+<br />
+
+<br />
+
+# 1. Introduction
+
+The aim of this project is to analyse a multidimensional dataset which mainly needs to count with enough observations, a considerable number of quantitative variables and, at least, one qualitative variable in order to divide the data into different groups of interest.
+Considering that the dataset must fulfill all the previous characteristics, "FIFA 18 Player Dataset](https://www.kaggle.com/kevinmh/fifa-18-more-complete-player-dataset#complete.csv)" (17995 objects x 185 columns) has been chosen. The mentioned file contains information about the players who take part in the classical football video game. Between the different fields of the dataset, there are some qualitative variables which are candidates to split it in different groups, such as nationality, league or position of the player. In addition, each player shows their qualities in a detailed way. For example, these qualities can be physical (sprint speed, jumping.), technical (shot power, finishing.) or tactical (positioning, vision.). They are valued with a numeric value between 0 and 100.
+To conclude, after a first study about the data, a cleaning is necessary so that remove some information that it is not useful in this project. Therefore, in the following steps of this project, this action and the proper analysis will be performed.
+
+<br />
+
+<br />
+
+# 2. Dataset preparation
+
+As it was exposed in the introduction of this project, the amount of available data was huge in order to handle them. Therefore, in this new section, the first goal is to reduce the quantity of variables whereas the main information is conserved.
+In the original dataset, the wide quantity of variables makes strongly complicated to extract conclusions. For this reason, a lot of variables have been cleaned in different steps.
+On the one hand, the video game counts with different abilities which have a Boolean value depending on if a single player has it or not. For instance, some of these skills are technical dribbler trait, tackling speciality or play marker speciality, and they are given to players which are actual specialist in that branches. Nevertheless, they are related to numeric variables, so they are redundant, reason why they have been deleted.
+Secondly, other repeated information is provided about the player position. This video game, as it happens in the real world, takes into account many sub positions between the main ones. For example, midfielder position has inside a variety of them (centre attacking midfielder, right defence midfielder...), and the same with strikers and defenders. In order to have only four different classes, every single position have been grouped by the main four: goalkeeper, defender, midfielder and striker. In addition, some players have the capacity to assume different roles and they can play, for example, either midfielder or striker. In these cases, and analogously with defenders and midfielders, it has been chosen the most valued position for each player. 
+
+```{r load_dataset, echo=FALSE}
+dataset <- read.csv("fifa.csv", sep="," , header=TRUE)
+names(dataset)
+head(dataset)
+
+fifa <- dataset[, 7:ncol(dataset)]
+rm(dataset)
+names(fifa)
+head(fifa)
+```
+
+Finally, although video game considers many quantitative characteristics for each player, they can be grouped by seven principal skills: pace (acceleration, sprint speed), shooting (positioning, finishing, shot power, long shot, volleys, penalties), dribbling (agility, balance, reactions, ball control, dribbling), defending (interceptions, heading accuracy, marking, standing tackle, sliding tackle), passing (vision, crossing, free kick accuracy, short passing, curve), physicality (jumping, stamina, strength, aggression) and goalkeeper abilities.
+To conclude this cleaning, the final fields are the following list:
+*	Height (cm)
+*	Weight (kg)
+*	Pace (0 - 100)
+*	Shooting (0 - 100)
+*	Passing (0 - 100)
+*	Dribbling (0 - 100)
+*	Defending (0 - 100)
+*	Physicality (0 - 100)
+*	Goalkeeper abilities (0 - 100)
+*	Position (goalkeeper, defender, midfielder, striker)
+Nevertheless, although the descriptive analysis is performed with these variables, the rest of them are stored in the case that they are useful in the future, as well other qualitative ones.
+
+<br />
+
+<br />
+
+# 3. Descriptive Analysis
+
+### 3.1. Position
+
+In this case, as a qualitative variable, it is interesting to know the class frequency for each position in order to know if the distribution of them is coherent with the usual number of them in the team. Therefore, as it can be observed in the first figures, a 36.6% of players are defenders, a 25.5% are midfielders, a 26.6% are strikers and a 11.2% are goalkeepers. This fit with typical tactics in the teams, such as 4-3-3, and the squad compositions with, in general, 3 goalkeepers, 10 defenders, 7 midfielders and 7 strikers. Obviously, each team has a particular situation and this number could change. In addition, it has to be taken into account that there are 253 players who do not play in any team, but with their national team. Notice that this fact is translated into an unbalanced datset.
+
+```{r descriptive_analysis1}
+fifa.x <- fifa [, 1:ncol(fifa)-1]
+fifa.y <- fifa [, ncol(fifa)]
+
+fifa.y.abs.freq <- table(fifa.y)[c("Goalkeeper", "Defender", "Midfielder", "Striker")]
+fifa.y.abs.freq 
+
+barplot(fifa.y.abs.freq, col=c("yellow", "blue", "green", "red"), main="Barplot of Player Position", ylab="Absolute frequencies")
+
+fifa.y.rel.freq <- round(fifa.y.abs.freq/sum(fifa.y.abs.freq)*100, 2)
+labels <- paste(c("Goalkeeper", "Defender", "Midfielder", "Striker"), fifa.y.rel.freq)
+labels <- paste(labels, "%", sep="")
+pie(fifa.y.abs.freq, col=c("yellow", "blue", "green", "red"), main="Piechart of Player Position", radius=1, labels=labels)
+```
+
+<br />
+
+### 3.2. Quantitative variables
+
+In this sub section, a wide variety of visualizations have been produced with the intention of having a clear idea about the distribution of the abilities among the different positions.
+First of all, the boxplots allow us to observe some characteristics about data location and spread divided by position and ability, including height and weight. It means that some interesting conclusions are shown.
+
+```{r descriptive_analysis2}
+fifa.y.qualities <- c("Height", "Weight", "Pace", "Shooting", "Passing", "Dribbling", "Defense", "Physical", "Goalkeeper abilities")
+
+for(i in seq(1,length(fifa.y.qualities), by=1)){
+  boxplot(fifa.x[,i]~fifa.y, main=fifa.y.qualities[i], xlab="", col=c("blue", "yellow", "green", "red"))
+}
+```
+
+On the one hand, goalkeepers highlight, obviously, because of their goalkeeper abilities, their height and their weight. All of these characteristics, together with an acceptable passing skill, have sense if the current tendency about this position is taken into account, where the physic of the goalkeeper is relevant, and they have importance in the game as a field player. In fact, they are at the same level of midfielders and strikers in dribbling skills, which shows that they are not only to avoid goals.
+Secondly, considering defender tasks, it seems logic that they have the defence skill higher than the rest of the positions. Nevertheless, their physical power is important too, as it can be seen. In addition, players who participate in this position do not need to score goals, so in skills such as dribbling and shooting they have, in general, the lowest values.
+In the midfielders' case, they have the mission of creating and being the pillar of their teams, which is traduced in good passing skills. Furthermore, they are complete players who are not the best in other qualities, but they have acceptable values. A curiosity is that they have, in average, the lowest height and weight. This is probably provoked by the typical characteristics of offensive midfielders, who usually are small whereas they are talented.
+Finally, strikers are prepared to score goals, which explains their shooting, pace and dribbling skills while, in average, they are the worst in defence tasks. It is curious that, goalkeepers have a similar ability of shooting. However, the use of it is different because, while strikers use it in order to achieve goals, in goalkeepers is used to start the game from their area with a long passing.
+
+```{r descriptive_analysis3}
+fifa.x.colour <- seq(1, 17994)
+fifa.x.colour[fifa.y=="Goalkeeper"] <- "yellow"
+fifa.x.colour[fifa.y=="Defender"] <- "blue"
+fifa.x.colour[fifa.y=="Midfielder"] <- "green"
+fifa.x.colour[fifa.y=="Striker"] <- "red"
+
+pairs(fifa.x, col=c("blue", "yellow", "green", "red")[fifa.y],  main="FIFA dataset scatter matrix")
+```
+
+As it can be observed in the previous scatter matrix about the dat, it is really complicated to extract conclusions from the graph taking into account the raw information, with this quantity of variables. Nevertheless, some groups are identified depending on the variables, what is expected because each position has its particularities.
+With the aim of knowing the adequacy of the following classification methods, it is interesting to have information about the data distribution. Therefore, density functions have been computed for each quantitative variable and, although in general they have acceptable behaviours, shooting, defence and goalkeeper abilities are not as gaussian as they should.
+
+```{r descriptive_analysis4}
+for(i in seq(1,length(fifa.y.qualities), by=1)){
+  density.goalkeeper <- density(fifa.x[,i][fifa.y=="Goalkeeper"])
+  density.goalkeeper.min.x <- min(density.goalkeeper$x)
+  density.goalkeeper.min.y <- min(density.goalkeeper$y)
+  density.goalkeeper.max.x <- max(density.goalkeeper$x)
+  density.goalkeeper.max.y <- max(density.goalkeeper$y)
+  density.defender <- density(fifa.x[,i][fifa.y=="Defender"])
+  density.defender.min.x <- min(density.defender$x)
+  density.defender.min.y <- min(density.defender$y)
+  density.defender.max.x <- max(density.defender$x)
+  density.defender.max.y <- max(density.defender$y)
+  density.midfielder <- density(fifa.x[,i][fifa.y=="Midfielder"])
+  density.midfielder.min.x <- min(density.midfielder$x)
+  density.midfielder.min.y <- min(density.midfielder$y)
+  density.midfielder.max.x <- max(density.midfielder$x)
+  density.midfielder.max.y <- max(density.midfielder$y)
+  density.striker <- density(fifa.x[,i][fifa.y=="Striker"])
+  density.striker.min.x <- min(density.striker$x)
+  density.striker.min.y <- min(density.striker$y)
+  density.striker.max.x <- max(density.striker$x)
+  density.striker.max.y <- max(density.striker$y)
+  
+  density.total <- density(fifa.x[,i])
+  density.total.min.x <- min(density.total$x)
+  density.total.min.y <- min(density.total$y)
+  density.total.max.x <- max(density.total$x)
+  density.total.max.y <- max(density.total$y)
+  
+  xlim=c(min(density.goalkeeper.min.x, density.defender.min.x, density.midfielder.min.x, density.striker.min.x, density.total.min.x), max(density.goalkeeper.max.x, density.defender.max.x, density.midfielder.max.x, density.striker.max.x, density.total.max.x))
+  
+  ylim=c(min(density.goalkeeper.min.y, density.defender.min.y, density.midfielder.min.y, density.striker.min.y, density.total.min.y), max(density.goalkeeper.max.y, density.defender.max.y, density.midfielder.max.y, density.striker.max.y, density.total.max.y))
+  
+  plot(density.total, main=paste("Density function of", fifa.y.qualities[i]), col="black", xlim=xlim, ylim=ylim)
+  lines(density.goalkeeper, col="yellow")
+  lines(density.defender, col="blue")
+  lines(density.midfielder, col="green")
+  lines(density.striker, col="red")
+  legend("topright", legend=c("Goalkeeper", "Defender", "Midfielder", "Striker", "Total"), col=c("yellow", "blue", "green", "red", "black"), lty=1, cex=0.65)
+}
+```
+
+In addition, in spite of the quantity of observations, which makes really difficult to interpret a parallel coordinates plot (X axis presents the quantitative variables in the same order as at the beginning of the "Dataset preparation" section), it has been included in order to confirm some tendencies extracted from the previous boxplots. For example, if the axis of goalkeeper abilities is observed, there is a clear concentration of goalkeepers in the top; in the passing axis, something similar happens with goalkeepers and midfielders, whereas defenders are in the lowest zone in this ability, as well in shooting and dribbling; or strikers have the dominium in pace.
+
+```{r descriptive_analysis5}
+parcoord(fifa.x, col=c("blue", "yellow", "green", "red")[fifa.y], var.label=TRUE, main="Parallel Coordinate plot of FIFA dataset")
+```
+
+<br />
+
+### 3.3. Principal Component Analysis
+
+The ideal framework would be working with all observation in order to obtain more information. Nevertheless, this means that some of the algorithms would take much time to be developed. Therefore, taking into account that the aim of this project is mainly academic, it has been decided to divided the dataset into two parts but with the same proportion of each studied position. Furthermore, the selected part to work, counts with a train set and a test set with the objective of fitting the model using the train set and then, having an estimate of the model performance with the test set.
+
+```{r split_dataset, echo=FALSE}
+source("utils.R")
+set.seed(0)
+
+fifa.split = splitter(fifa, sample_fraction=0.5)
+```
+
+Not only the number of observations is a problem when some models are trained, as well as the number of attributes. Nevertheless, it is important to know how to perform a correct dimensions reduction. In this case, the used method is a Principal Component Analysis.
+
+```{r principal_component1, echo=FALSE}
+fifa.pca = pca_transform(fifa.split$train.x, fifa.split$test.x)
+fifa.train.x = fifa.split$train.x
+fifa.test.x = fifa.split$test.x
+fifa.test.x.pca = fifa.pca$test.x.pca
+fifa.train.x.pca = fifa.pca$train.x.pca
+fifa.test.y = fifa.split$test.y
+fifa.train.y = fifa.split$train.y
+
+fifa.train <- as.data.frame(fifa.train.x.pca)
+fifa.test <- as.data.frame(fifa.test.x.pca)
+fifa.train <- cbind(fifa.train, fifa.train.y)
+fifa.test <- cbind(fifa.test, fifa.test.y)
+names(fifa.train) <- c("PC1","PC2","PC3","position")
+names(fifa.test) <- c("PC1","PC2","PC3","position")
+fifa.test.def <- fifa.test
+fifa.train.def <- fifa.train
+
+fifa.train.goalkeeper <- fifa.train
+fifa.train.goalkeeper$bin <- with(fifa.train.goalkeeper, ifelse(fifa.train.goalkeeper$position=="Goalkeeper", 1, 0))
+
+fifa.train.defender <- fifa.train
+fifa.train.defender$bin <- with(fifa.train.defender, ifelse(fifa.train.defender$position=="Defender", 1, 0))
+
+fifa.train.midfielder <- fifa.train
+fifa.train.midfielder$bin <- with(fifa.train.midfielder, ifelse(fifa.train.midfielder$position=="Midfielder", 1, 0))
+
+fifa.train.striker <- fifa.train
+fifa.train.striker$bin <- with(fifa.train.striker, ifelse(fifa.train.striker$position=="Striker", 1, 0))
+
+fifa.test.goalkeeper <- fifa.test
+fifa.test.goalkeeper$bin <- with(fifa.test.goalkeeper, ifelse(fifa.test.goalkeeper$position=="Goalkeeper", 1, 0))
+
+fifa.test.defender <- fifa.test
+fifa.test.defender$bin <- with(fifa.test.defender, ifelse(fifa.test.defender$position=="Defender", 1, 0))
+
+fifa.test.midfielder <- fifa.test
+fifa.test.midfielder$bin <- with(fifa.test.midfielder, ifelse(fifa.test.midfielder$position=="Midfielder", 1, 0))
+
+fifa.test.striker <- fifa.test
+fifa.test.striker$bin <- with(fifa.test.striker, ifelse(fifa.test.striker$position=="Striker", 1, 0))
+
+rm(fifa.split)
+#rm(fifa.pca)
+
+```
+
+As a result of the PCA, the dataset is transformed into a new one in which the variables are uncorrelated and they are linear combinations of the original ones. In addition, they are ordered by the variance, being the first principal component the corresponging to the highest variance.
+
+```{r principal_component2, echo=FALSE}
+fviz_eig(fifa.pca$pca.model, addlabels=T, barfill="deepskyblue2", barcolor="deepskyblue4", ylim=c(0, 40), main="Scree plot of FIFA PCA")
+```
+
+As it can be observed in the previous plot, the first three principal components explain a 76.7% of the variance, what has been considered enough to work only with these transformed variables. In order to visualize the new dataset, some plots have been included.
+
+```{r principal_component3, echo=FALSE}
+set.seed(0)
+fifa.pca.train.test <- rbind(fifa.train, fifa.test)
+index.order <- sample(seq(1,length(fifa.pca.train.test[, 1])))
+fifa.pca.train.test <- fifa.pca.train.test[index.order,]
+fifa.pca.train.test <- rbind(fifa.pca.train.test[11,], fifa.pca.train.test[1:10,], fifa.pca.train.test[12:nrow(fifa.pca.train.test),])
+fifa.pca.train.test <- rbind(fifa.pca.train.test[5,], fifa.pca.train.test[1:4,], fifa.pca.train.test[6:nrow(fifa.pca.train.test),])
+
+pairs(fifa.pca.train.test[, 1:3], col=c("red", "yellow", "green", "blue")[fifa.pca.train.test$position],  main="FIFA PCA dataset scatter matrix", pch=20)
+```
+
+Focusing on data representation after introducing PCA, scatterplots for PC1, PC2 and PC3 have been drawn with the different groups of players in their respective colours used along the report(goalkeepers in yellow, defenders in blue, midfielders in green and strikers in red). In this case, in the first combination between PC1 and PC2, it is observed how strikers are clearly identified, while defenders and midfielders are practically together. On the other hand, PC2 and PC3 seem to help to separate both groups, but it is clear that is complicated to do so. These difficulties are probably caused because there are midfielders with similar characteristics to defenders. In fact, the versatility of midfielders is noticed in PC1 and PC3 scatterplot, in which they are together with defenders. Previous comments are an intuition which makes us think that when some predictions will be performed, the results will be less accurate for this position.
+
+```{r principal_component4, echo=FALSE}
+main.pca <- c("Weights for the first PC", "Weights for the second PC", "Weights for the third PC")
+for(i in seq(1,3, by=1)){
+  plot(fifa.pca$pca.model$rotation[,i], ylim=c(-0.5, 0.7), main=main.pca[i], ylab="Weight", xlab="Original variable", pch=16, col='red')
+  lines(fifa.pca$pca.model$rotation[,i])
+}
+```
+
+Taking into account only the first three principal components, it seems an evidence that players with acceptable defence and physical conditions, as well high weight and height, are separated from that players whose main abilities are dribbling, passing or shooting. Then, the second principal component gives importance to goalkeepers, who, in general, seems to be heavy and tall people, while they have interesting shooting and physical skills. In addition, the third principal component allows separating the players who are pure defenders from those who could be midfielders with some defence skills. This is due to the fact that it gives a high relevance to physical and defence abilities. Obviously, these weights are related to the previous scatter matrix.
+
+```{r principal_component5, echo=FALSE}
+main.pca <- c("Density function of first PC", "Density function of second PC", "Density function of third PC")
+for(i in seq(1, 3, by=1)){
+  density.pca <- density(fifa.pca.train.test[,i])
+
+  plot(density.pca, main=main.pca[i], col="black")
+}
+
+```
+
+Finally, the density function of each selected principal component has been plotted in order to study the normality of the data. As it can be observed, the functions are not normal. Therefore, in the following sections, for those applied methods which have the assumption of normality, this fact must be taken into account because no appropiated transformation has been found to improve the normality.
+
+```{r principal_component6, echo=FALSE}
+yj1 <- car::powerTransform(lm(fifa.train$PC1 ~ 1), family = "yjPower")
+lambdayj1 <- yj1$lambda
+pc1yj <- car::yjPower(U = fifa.train$PC1, lambda = lambdayj1)
+nortest::lillie.test(pc1yj)
+
+yj2 <- car::powerTransform(lm(fifa.train$PC2 ~ 1), family = "yjPower")
+lambdayj2 <- yj2$lambda
+pc2yj <- car::yjPower(U = fifa.train$PC2, lambda = lambdayj2)
+nortest::lillie.test(pc2yj)
+
+yj3 <- car::powerTransform(lm(fifa.train$PC3 ~ 1), family = "yjPower")
+lambdayj3 <- yj3$lambda
+pc3yj <- car::yjPower(U = fifa.train$PC3, lambda = lambdayj3)
+nortest::lillie.test(pc3yj)
+```
+
+Notice that the previous chunk of code try to perform a Yeo-Johnson transformation, but the Lilliefors test rejects the null hypothesis or normality.
+
+<br />
+
+<br />
+
+# 4. Bayesian Clustering.
+
+### 4.1 Bayesian estimation of a finite mixture of distributions.
+
+
+The goal of this step is to explore more in depth the dataset with the focus on the final goal of the project: Bayesian Classification. With this in mind, we have decided to use the Finite Mixture of Gaussians to find clusters, and with them patterns, in our data. We chose a mixture of gaussians because, despite our data is always positive, we saw in the Descriptive Analysis that there is almost no data with values near zero and therefore there is not an abrupt boundary. The observed distributions are more or less bell-shaped with the tails not approaching zero. We could have chosen a mixture of Gammas to adapt to the positiveness of our data, but we decided this complication would not have added much. 
+
+Given that we are using this clustering algorithm to learn about the dataset and perform the classification step in a more successful way, we will use the same attributes that will be used for classification: Principal Components 1, 2 and 3. They have been chosen because they gather most of the variance and because when using a higher number of attributes these iterative algorithms took hours to converge. 
+
+Since this will become a classification problem and the output class is known, the number of distributions in the final mixture is known: $K = 4$. However, we will also explore $K = 2$ to see if we can discriminate between Goalkeepers and outfield players, and $K = 3$ to separate Goalkeepers, defensive players and offensive players. Then, we do not need to spend resources in choosing the right prior for this parameter. In all cases, since the number of components is fixed, Gibbs sampling is used as MCMC algorithm for model approximation. 
+
+In the case of $\mu$ and $\sum$, $\mu$ follows a gaussian prior and $\sum$ (the covariance matrix) follows a Wishart distribution; a generalized gamma distribution to multiple dimensions.
+
+Finally, it is usually assumed that the mixture weights ($\omega$) follow a Dirichlet prior (Dirichlet distributions are the conjugate priors of categorial and multinomial distributions). 
+
+##### K = 4.
+
+```{r common_vars, echo=FALSE}
+fifa.x.pca = data.frame(rbind(fifa.train.x.pca, fifa.test.x.pca))
+#small_dataset = fifa.x.pca[sample(nrow(fifa.x.pca), 2000), ]
+
+predictors <- names(fifa.x.pca)
+
+nMCMC <- c(burn=5000, keep=10000, thin=5, info=1000)
+
+gk_index = which(fifa.train.y == 'Goalkeeper')
+df_index = which(fifa.train.y == 'Defender')
+mf_index = which(fifa.train.y == 'Midfielder')
+st_index = which(fifa.train.y == 'Striker')
+```
+
+```{r clustering_4}
+set.seed(0)
+
+Prior.4 <- list(priorK = "fixed", Kmax = 4)
+
+# Run an MCMC algorithm to obtain a sample from the posterior.
+fit.4 <- NMixMCMC(y0 = fifa.x.pca, prior = Prior.4, nMCMC = nMCMC,
+                  scale = list(shift=0, scale=1), PED = F)
+```
+
+
+*Check for convergence.*
+
+```{r clust_4_convergence, echo=FALSE}
+# K is fixed, so check convergence of mu and omega (the covariance matrix will be difficult to plot)
+plot(seq(from = 1, to = 10000, by = 20), fit.4$mu[seq(1, 10000, 20),1], 
+     type='n', main=expression(paste(mu[1])), xlab='Iteration',
+     ylab=expression(paste(mu[1])))
+lines(seq(from = 1, to = 10000, by = 20), fit.4$mu[seq(1, 10000, 20),1])
+
+plot(seq(from = 1, to = 10000, by = 20), fit.4$mu[seq(1, 10000, 20),2], 
+     type='n', main=expression(paste(mu[2])), xlab='Iteration',
+     ylab=expression(paste(mu[2])))
+lines(seq(from = 1, to = 10000, by = 20), fit.4$mu[seq(1, 10000, 20),2])
+
+plot(seq(from = 1, to = 10000, by = 20), fit.4$mu[seq(1, 10000, 20),3], 
+     type='n', main=expression(paste(mu[3])), xlab='Iteration',
+     ylab=expression(paste(mu[3])))
+lines(seq(from = 1, to = 10000, by = 20), fit.4$mu[seq(1, 10000, 20),3])
+
+plot(seq(from = 1, to = 10000, by = 20), fit.4$mu[seq(1, 10000, 20),4], 
+     type='n', main=expression(paste(mu[4])), xlab='Iteration',
+     ylab=expression(paste(mu[4])))
+lines(seq(from = 1, to = 10000, by = 20), fit.4$mu[seq(1, 10000, 20),4])
+
+
+plot(seq(from = 1, to = 10000, by = 20), fit.4$w[seq(1, 10000, 20),1], 
+     type='n', main=expression(paste(omega[1])), xlab='Iteration',
+     ylab=expression(paste(omega[1])))
+lines(seq(from = 1, to = 10000, by = 20), fit.4$w[seq(1, 10000, 20),1])
+
+plot(seq(from = 1, to = 10000, by = 20), fit.4$w[seq(1, 10000, 20),2], 
+     type='n', main=expression(paste(omega[2])), xlab='Iteration',
+     ylab=expression(paste(omega[2])))
+lines(seq(from = 1, to = 10000, by = 20), fit.4$w[seq(1, 10000, 20),2])
+
+plot(seq(from = 1, to = 10000, by = 20), fit.4$w[seq(1, 10000, 20),3], 
+     type='n', main=expression(paste(omega[3])), xlab='Iteration',
+     ylab=expression(paste(omega[3])))
+lines(seq(from = 1, to = 10000, by = 20), fit.4$w[seq(1, 10000, 20),3])
+
+plot(seq(from = 1, to = 10000, by = 20), fit.4$w[seq(1, 10000, 20),4], 
+     type='n', main=expression(paste(omega[4])), xlab='Iteration',
+     ylab=expression(paste(omega[4])))
+lines(seq(from = 1, to = 10000, by = 20), fit.4$w[seq(1, 10000, 20),4])
+```
+
+We have used 10000 iterations (after burning 5000). In the convergence plot, we see how most of the parameters $\mu$ and $\omega$ oscillate. However, these oscillation are in a small range of values and when using more iterations (we have checked with 20000 and 30000) they do not disappear. 
+
+We are not plotting here how $K$ varies since it is fixed. Also, the parameters of the covariance matrix are also optimized through the iterations, but it is difficult to visualize them in a 2D report. We have observed that they exhibit a similar behaviour as that of $\mu$ and $\omega$. 
+
+We will now plot the distributions in 1D (univariate) and in 2D (bivariate).
+
+```{r plot_4}
+# Plot univariate mixtures
+pdens1.4 <- NMixPredDensMarg(fit.4, lgrid=50)
+plot(pdens1.4, main=predictors, xlab=predictors)
+```
+
+For the first Principal Component the distribution is somehow bimodal, but not for the other Principal Components (recall that this component is related to the physical abilities and the height). With the 1-dimensional plots alone, the clusters are not clearly differenciated. 
+
+```{r plot_42}
+# Plot bivariate mixtures
+pdens2.4 <- NMixPredDensJoint2(fit.4)
+plot.NMixPredDensJoint2(pdens2.4, xylab=predictors, auto.layout=FALSE)
+prob.4 <- fit.4$poster.comp.prob_u
+```
+
+Using only the 2-dimensional distributions clusters are not easly recognized, either, despite PC3 seems to discriminate 2 groups more or less clearly. 
+
+```{r echo=FALSE}
+c.4 = apply(prob.4, 1, which.max)
+print('Percentages of Players classified in the different clusters: ')
+print(round(table(c.4) / length(c.4), 2))
+```
+
+The first pattern we observe is that clusters 2 and 4 are much bigger than clusters 1 and 3. 
+
+```{r echo=FALSE}
+print('Predictions for 10 random Defenders: ')
+print(prob.4[df_index[1:10],])
+c.4.df = apply(prob.4[df_index,], 1, which.max)
+print('Percentages of Defenders classified in the different clusters: ')
+print(round(table(c.4.df) / length(c.4.df), 2))
+```
+
+Defenders are distributed more or less evenly in groups 1 and 2. In addition, for some of the observations, the probability of belonging to cluster 1 and 2 are very similar.
+
+```{r echo=FALSE}
+print('Predictions for 10 random Goalkeepers: ')
+print(prob.4[gk_index[1:10],])
+c.4.gk = apply(prob.4[gk_index,], 1, which.max)
+print('Percentages of Goalkeepers classified in the different clusters: ')
+print(round(table(c.4.gk) / length(c.4.gk), 2))
+```
+
+In the case of Goalkeepers, our clustering model have strongly grouped them one single cluster. And, when observing some of the probabilities, it seems like the confidence of this grouping is high. 
+
+```{r echo=FALSE}
+print('Predictions for 10 random Midfielders: ')
+print(prob.4[mf_index[1:10],])
+c.4.mf = apply(prob.4[mf_index,], 1, which.max)
+print('Percentages of Midfielders classified in the different clusters: ')
+print(round(table(c.4.mf) / length(c.4.mf), 2))
+```
+
+As it happened with the Defenders, the mixture model does not group all Midfielders in one single group. They are distributed among several clusters, and some observation probabilities are very similar for all of them. 
+
+```{r echo=FALSE}
+print('Predictions for 10 random Strikers: ')
+print(prob.4[st_index[1:10],])
+c.4.st = apply(prob.4[st_index,], 1, which.max)
+print('Percentages of Strikers classified in the different clusters: ')
+print(round(table(c.4.st) / length(c.4.st), 2))
+```
+
+Strikers, as it happened with Goalkeepers, are grouped in one single group. 
+
+<br />
+
+Summarizing, there is one cluster for Goalkeepers and another for Strikers; Midfielders are in the Strikers' group and in a third group; and Defenders are evenly distributed between this third group and another group. 
+
+With respect to the probabilities, from this small subset, we have seen how most observations are strongly classified in one of the clusters. However, there is also an important amount of observations where the probability of belonging to one cluster or another is not so deterministic. This happens mostly for Defenders and Midfielders, while Goalkeepers and Strikers are classified with higher confidence, in general. 
+
+<br />
+
+##### K = 2.
+
+Let's now compute the algorithm fixing the number of distributions to 2.
+
+```{r clustering_2}
+set.seed(0)
+# Check now with 2 groups (Goalkeepers and outfield players)
+Prior.2 <- list(priorK = "fixed", Kmax = 2) 
+
+fit.2 <- NMixMCMC(y0 = fifa.x.pca, prior = Prior.2, nMCMC = nMCMC,
+                  scale = list(shift=0, scale=1), PED = F)
+```
+
+*Check for convergence.*
+
+```{r clust_2_convergence}
+# K is fixed, so check convergence of mu and omega (the covariance matrix will be difficult to plot)
+plot(seq(from = 1, to = 10000, by = 20), fit.2$mu[seq(1, 10000, 20),1], 
+     type='n', main=expression(paste(mu[1])), xlab='Iteration',
+     ylab=expression(paste(mu[1])))
+lines(seq(from = 1, to = 10000, by = 20), fit.2$mu[seq(1, 10000, 20),1])
+
+plot(seq(from = 1, to = 10000, by = 20), fit.2$mu[seq(1, 10000, 20),2], 
+     type='n', main=expression(paste(mu[2])), xlab='Iteration',
+     ylab=expression(paste(mu[2])))
+lines(seq(from = 1, to = 10000, by = 20), fit.2$mu[seq(1, 10000, 20),2])
+
+
+
+plot(seq(from = 1, to = 10000, by = 20), fit.2$w[seq(1, 10000, 20),1], 
+     type='n', main=expression(paste(omega[1])), xlab='Iteration',
+     ylab=expression(paste(omega[1])))
+lines(seq(from = 1, to = 10000, by = 20), fit.2$w[seq(1, 10000, 20),1])
+
+plot(seq(from = 1, to = 10000, by = 20), fit.2$w[seq(1, 10000, 20),2], 
+     type='n', main=expression(paste(omega[2])), xlab='Iteration',
+     ylab=expression(paste(omega[2])))
+lines(seq(from = 1, to = 10000, by = 20), fit.2$w[seq(1, 10000, 20),2])
+```
+
+Once again, parameter values oscillate, but these oscillations do not disappear when using 20000 or 30000 iterations. 
+
+We will now plot the distributions in 1D (univariate) and in 2D (bivariate).
+
+```{r plot_2}
+# Plot univariate mixtures
+pdens1.2 <- NMixPredDensMarg(fit.2, lgrid=50)
+plot(pdens1.2, main=predictors, xlab=predictors)
+```
+
+As it happened when fixing the number of distributions to 4, from the graphs of the 1 dimensional distributions, the clusters are not very visual. The distributions found are quite overlapped, except perhaps for PC3. 
+
+```{r}
+# Plot bivariate mixtures
+pdens2.2 <- NMixPredDensJoint2(fit.2)
+plot.NMixPredDensJoint2(pdens2.2, xylab=predictors, auto.layout=FALSE)
+
+prob.2 <- fit.2$poster.comp.prob_u
+```
+
+In the case of the bivariate distributions, we can differenciate the clusters when PC3 comes into play. In the other figure, the two distributions overlap a lot. 
+
+```{r prob_per_cluster2, echo=FALSE}
+c.2 = apply(prob.2, 1, which.max)
+print('Percentages of Players classified in the different clusters: ')
+print(round(table(c.2) / length(c.2), 2))
+```
+
+When using only two clusters, both are created of similar size, with similar number of observations grouped in both of them. 
+
+```{r echo=FALSE}
+print('Predictions for 10 random Defenders: ')
+print(prob.2[df_index[1:10],])
+c.2.df = apply(prob.2[df_index,], 1, which.max)
+print('Percentages of Defenders classified in the different clusters: ')
+print(round(table(c.2.df) / length(c.2.df), 2))
+```
+
+Defenders are mostly grouped in cluster 1 and in general with high confidence in the assignment.
+
+```{r echo=FALSE}
+print('Predictions for 10 random Goalkeepers: ')
+print(prob.2[gk_index[1:10],])
+c.2.gk = apply(prob.2[gk_index,], 1, which.max)
+print('Percentages of Goalkeepers classified in the different clusters: ')
+print(round(table(c.2.gk) / length(c.2.gk), 2))
+```
+
+On the other hand, Goalkeepers are grouped undoubtfully in cluster 2. 
+
+```{r echo=FALSE}
+print('Predictions for 10 random Midfielders: ')
+print(prob.2[mf_index[1:10],])
+c.2.mf = apply(prob.2[mf_index,], 1, which.max)
+print('Percentages of Midfielders classified in the different clusters: ')
+print(round(table(c.2.mf) / length(c.2.mf), 2))
+```
+
+Midfielders are in this case particular, since the mixture model is not able to group them in any of the cluster. They are located in cluster 1 or 2 and in many cases with high confidence. This makes us believe the criteria for grouping the players is not related with their position, but with other criteria such as physical attributes (height, speed, etc).
+
+```{r echo=FALSE}
+print('Predictions for 10 random Strikers: ')
+print(prob.2[st_index[1:10],])
+c.2.st = apply(prob.2[st_index,], 1, which.max)
+print('Percentages of Strikers classified in the different clusters: ')
+print(round(table(c.2.st) / length(c.2.st), 2))
+```
+
+Finally, strikers are grouped with Goalkeepers, mostly. 
+
+Then, to summarize, there is one cluster with the Strikers and Goalkeepers (with high confidence in the assignment), another with the Defenders (again with high confidence in the assignment) and Midfielders are pretty much everywhere. 
+
+<br />
+
+##### K = 3.
+
+Let's now use the Mixture Model with 3 clusters. 
+
+```{r clustering_3}
+set.seed(0)
+# Check now with 3 groups (Goalkeepers, defensive players and offensive players)
+Prior.3 <- list(priorK = "fixed", Kmax = 3) 
+
+fit.3 <- NMixMCMC(y0 = fifa.x.pca, prior = Prior.3, nMCMC = nMCMC,
+                  scale = list(shift=0, scale=1), PED = F)
+```
+
+*Check for convergence.*
+
+```{r clust_3_convergence}
+# K is fixed, so check convergence of mu and omega (the covariance matrix will be difficult to plot)
+plot(seq(from = 1, to = 10000, by = 20), fit.3$mu[seq(1, 10000, 20),1], 
+     type='n', main=expression(paste(mu[1])), xlab='Iteration',
+     ylab=expression(paste(mu[1])))
+lines(seq(from = 1, to = 10000, by = 20), fit.3$mu[seq(1, 10000, 20),1])
+
+plot(seq(from = 1, to = 10000, by = 20), fit.3$mu[seq(1, 10000, 20),2], 
+     type='n', main=expression(paste(mu[2])), xlab='Iteration',
+     ylab=expression(paste(mu[2])))
+lines(seq(from = 1, to = 10000, by = 20), fit.3$mu[seq(1, 10000, 20),2])
+
+plot(seq(from = 1, to = 10000, by = 20), fit.3$mu[seq(1, 10000, 20),3], 
+     type='n', main=expression(paste(mu[3])), xlab='Iteration',
+     ylab=expression(paste(mu[3])))
+lines(seq(from = 1, to = 10000, by = 20), fit.3$mu[seq(1, 10000, 20),3])
+
+
+plot(seq(from = 1, to = 10000, by = 20), fit.3$w[seq(1, 10000, 20),1], 
+     type='n', main=expression(paste(omega[1])), xlab='Iteration',
+     ylab=expression(paste(omega[1])))
+lines(seq(from = 1, to = 10000, by = 20), fit.3$w[seq(1, 10000, 20),1])
+
+plot(seq(from = 1, to = 10000, by = 20), fit.3$w[seq(1, 10000, 20),2], 
+     type='n', main=expression(paste(omega[2])), xlab='Iteration',
+     ylab=expression(paste(omega[2])))
+lines(seq(from = 1, to = 10000, by = 20), fit.3$w[seq(1, 10000, 20),2])
+
+plot(seq(from = 1, to = 10000, by = 20), fit.3$w[seq(1, 10000, 20),3], 
+     type='n', main=expression(paste(omega[3])), xlab='Iteration',
+     ylab=expression(paste(omega[3])))
+lines(seq(from = 1, to = 10000, by = 20), fit.3$w[seq(1, 10000, 20),3])
+```
+
+Once again, parameter values oscillate, but these oscillations do not disappear when using 20000 or 30000 iterations. 
+
+We will now plot the distributions in 1D (univariate) and in 2D (bivariate).
+
+```{r plot_3}
+# Plot univariate mixtures
+pdens1.3 <- NMixPredDensMarg(fit.3, lgrid=50)
+plot(pdens1.3, main=predictors, xlab=predictors)
+```
+
+Finally, when fixing the number of distributions to 3, in the three attributes the three gaussians seem to be one in top of the others, they cannot be distinguished by the naked eye.
+
+```{r}
+# Plot bivariate mixtures
+pdens2.3 <- NMixPredDensJoint2(fit.3)
+plot.NMixPredDensJoint2(pdens2.3, xylab=predictors, auto.layout=FALSE)
+
+prob.3 <- fit.3$poster.comp.prob_u
+```
+
+Once again, as it happened with 2 distributions, the plots of the bivariate distributions only show a clue of distinct clusters when PC3 comes into play. 
+
+```{r prob_per_cluster3, echo=FALSE}
+c.3 = apply(prob.3, 1, which.max)
+print('Percentages of Players classified in the different clusters: ')
+print(round(table(c.3) / length(c.3), 2))
+```
+
+It is observed how the three clusters have different sizes. 
+
+```{r echo=FALSE}
+print('Predictions for 10 random Defenders: ')
+print(prob.3[df_index[1:10],])
+c.3.df = apply(prob.3[df_index,], 1, which.max)
+print('Percentages of Defenders classified in the different clusters: ')
+print(round(table(c.3.df) / length(c.3.df), 2))
+```
+
+Defenders are, in this case, classified with high confidence in only one of the clusters. The percentage of defenders in other groups is very small. 
+
+```{r echo=FALSE}
+print('Predictions for 10 random Goalkeepers: ')
+print(prob.3[gk_index[1:10],])
+c.3.gk = apply(prob.3[gk_index,], 1, which.max)
+print('Percentages of Goalkeepers classified in the different clusters: ')
+print(round(table(c.3.gk) / length(c.3.gk), 2))
+```
+
+Goalkeepers are also classified in general with high confidence in one of the clusters (in a different one than that of the Defenders).
+
+```{r echo=FALSE}
+print('Predictions for 10 random Midfielders: ')
+print(prob.3[mf_index[1:10],])
+c.3.mf = apply(prob.3[mf_index,], 1, which.max)
+print('Percentages of Midfielders classified in the different clusters: ')
+print(round(table(c.3.mf) / length(c.3.mf), 2))
+```
+
+As it has happened in all the other clusterings, Midfielders are not grouped in one single cluster. In this case, they are placed in the Defenders' cluster or in the Striker's cluster. They have different characteristics (just compare AndrÃ©s Iniesta with Arturo Vidal, for example) and therefore it is difficult to find common patterns that they all share. 
+
+```{r echo=FALSE}
+print('Predictions for 10 random Strikers: ')
+print(prob.3[st_index[1:10],])
+c.3.st = apply(prob.3[st_index,], 1, which.max)
+print('Percentages of Strikers classified in the different clusters: ')
+print(round(table(c.3.st) / length(c.3.st), 2))
+
+```
+
+Finally, Strikers are grouped most of them with high confidence in a third cluster that they share with some of the Midfielders. 
+
+<br /> 
+
+As a general remark for all the clustering scenarios, we observe how the univariate mixtures are quite unimodal. In addition, many of the bivariate mixtures are also unimodal (despite some of them are bimodal) and very similar no matter the fixed number of clusters! Using the attributes transformed with PCA we are not getting distributions that show a greater number of modes. However, some interesting insights have been observed.
+
+First, Midfielders have very different characteristics and cannot be placed in one single group by an unsupervised algorithm. They share attribute values with both Strikers and Defenders. This will make their classification more complicated. 
+
+Second, in some sense, Goalkeepers and Strikers share some abilities, since they are grouped together when $K = 2$. 
+
+Finally, Defenders are different from Goalkeepers and Strikers, but not so different, since in some scenarios they were grouped with the later. 
+
+<br />
+
+<br />
+
+# 5. Bayesian Classification.
+
+### 5.1 Gaussian Processes.
+
+We will now use Gaussian Processes for classification of the position of the players. In our case, we will use a Gaussian kernel, among the many possibilities offered by the library. The values this kernel takes for each of the points results in the covariance matrix used in the distribution of functions:
+
+$$\begin{pmatrix}
+  f \\
+  f_{*}
+ \end{pmatrix} \sim N (
+   \begin{pmatrix}
+  \mu \\
+  \mu_{*}
+ \end{pmatrix},
+    \begin{pmatrix}
+  K & K_{*} \\
+  K_{*}^T & K_{**}
+ \end{pmatrix})$$
+
+where the asterisk ($*$) denotes the unobserved points and $\sum$ is the kernel in the covariance matrix that computes the distance between points. An standard RBF kernel will be used because in projects of other subjects it has proved to be quite powerful and the computational cost of testing many kernels is high (considering our resources). The hyperparameters of this kernel are automatically optimized by the library.  
+
+Gaussian Processes were developed for regression. The idea behind is to fit a distribution of functions, instead of a single function as we used to do in classical regression. To be extended to classification we use the same trick as in logistic regression: we predict the log probability of belonging to a class (in our case, of being a Defender, Goalkeeper, Midfielder or Striker). 
+
+As in all Bayesian procedures, Gaussian Processes start with a prior distribution and update its values with the observed data. In this case, parameters are estimated using Laplace approximation, which is faster than MCMC despite it does not converge to the true value (as MCMC does). This choice was made because we did not have enough computational power to run the Gaussian Processes libraries that use MCMC.
+
+```{r group_train_test, echo=FALSE}
+fifa.train = data.frame(cbind(fifa.train.x.pca, as.character(fifa.train.y)))
+fifa.train$PC1 <- as.numeric(as.character(fifa.train$PC1))
+fifa.train$PC2 <- as.numeric(as.character(fifa.train$PC2))
+fifa.train$PC3 <- as.numeric(as.character(fifa.train$PC3))
+fifa.test = data.frame(fifa.test.x.pca)
+```
+
+```{r gp_train}
+set.seed(0)
+# Train the model
+train_model <- gausspr(V4~.,data=fifa.train)
+train_model
+#alpha(train_model) #model parameters
+error(train_model)
+```
+
+```{r gp_test, echo=FALSE}
+# Predict on the test set
+predclass <- predict(train_model,fifa.test)
+predclass.probabilities <- predict(train_model,fifa.test,type="probabilities")
+
+gk_index_t = which(fifa.test.y == 'Goalkeeper')
+df_index_t = which(fifa.test.y == 'Defender')
+mf_index_t = which(fifa.test.y == 'Midfielder')
+st_index_t = which(fifa.test.y == 'Striker')
+
+print('Predictions for 10 random Defenders: ')
+print(predclass.probabilities[df_index_t[11:20],])
+```
+
+Despite most Defenders are classified correctly (see the Confusion Matrix below), for some of them the probabilities are not high. This coincides with the unsupervised analysis, in which it was sometimes difficult to find clusters where all Defenders belonged together. 
+
+```{r echo=FALSE}
+print('Predictions for 10 random Goalkeepers: ')
+print(predclass.probabilities[gk_index_t[11:20],])
+```
+
+Goalkeerpers are usually classified with higher probability. However, they are sometimes confused with the strikers, since their physical attributes (height, weight, etc) and kicking abilities are similar and the Principal Components used emphasize these characteristics. 
+
+```{r echo=FALSE}
+print('Predictions for 10 random Midfielders: ')
+print(predclass.probabilities[mf_index_t[45:54],])
+```
+
+As anticipated by the unsupervised classification analysis, probabilities for the Midfielders are the lowest ones. Recall that the Finite Mixture of Gaussians algorithm was not able to group the Midfielders in a single cluster, since their abilities are quite heterogeneous. 
+
+```{r echo=FALSE}
+print('Predictions for 10 random Strikers: ')
+print(predclass.probabilities[st_index_t[11:20],])
+
+```
+
+Finally, strikers are classified perhaps with more probability than Midfielders, but not as much as Goalkeepers. 
+
+```{r confusion_matrix_gp}
+print('Confusion Matrix')
+confusionMatrix(fifa.test.y, predclass)
+
+```
+
+From the confusion matrix, the first value we should focus on is the p-value of the accuracy. It determines that the accuracy is better than the "no information rate". That is, our classifier is better than the dummy classifier that simply assigns each new instance to the majority class. 
+
+Then, the global accuracy is examined and results in a value near 80%. In addition, the $Kappa$ statistic is computed (similar to the accuracy but takes into account the possibility of agreement ocurring by chance). This value is slightly smaller than the general accuracy. 
+
+If we go class by class, it is observed from the table that, as anticipated by the Unsupervised Analysis, Goalkeepers are easy to identify, the Strikers and Defenders and finally Midfielders, which share features with other players and therefore it is complicated to classify them. 
+
+Defenders and Strikers are confused with Midfielders. Midfielders, despite being majoritarily correctly classified, are sometimes confused with Defenders or Strikers (at a similar rate). Interestingly (and as anticipated by the Unsupervised Analysis), some Goalkeepers are identified as Strikers, probably because the Principal Components we are using value more Height and Kicking abilities than other characteristics.
+
+Specificities are, of course greater than Sensitivities since we have more than 2 classes, and also always quite high (above 90% in most classes): when the classifier says that an observation DOES NOT belong to a given class, it is usually right. In addition, Sensitivities also then to be high: when the classifier says that an observation DOES belong to a class, it is again usually right.
+
+<br />
+
+### 5.2 Logistic Regression.
+
+Logistic regression is another technique borrowed by machine learning from the field of statistics. It is the go-to method for binary classification problems (problems with two class values). In the logistic model, the log-odds (the logarithm of the odds) for the value labeled "1" is a linear combination of one or more independent variables. The problem is that in this case, our variable is a categorical with four different possible values. So the way to proceed is to build a model in which one of the categories is labeled as 1, and all the others as 0. It is also known as 1 vs. all or multinomal classification.
+
+The probability for being a goalkeeper, defender, midfielder or striker is given by the following formula, with the $\beta$ parameters for the corresponding model.
+
+$$p_{(i)} = \frac{1}{1+e^{-{\beta_{0} + \beta_{1}*x_{1} + \beta_{2}*x_{2} + \beta_{3}*x_{3}}}}$$
+
+Then for all the $x$ in the dataset we follow this approach in order to classify every player in the category $i$ with probability $\hat{y}$:
+
+$$\hat{y} = argmax{(p_{i})}$$
+
+
+
+#### 5.2.1 Frequentist approach
+
+Model for the goalkeeper category:
+```{r echo=FALSE}
+fifa.goalkeeper.glm <- glm(bin ~ PC1 + PC2 + PC3 , family = binomial(link="logit"), data = fifa.train.goalkeeper)
+summary(fifa.goalkeeper.glm)
+```
+
+Model for the defender category: 
+
+```{r echo=FALSE}
+fifa.defender.glm <- glm(bin ~ PC1 + PC2 + PC3 , family = binomial(link="logit"), data = fifa.train.defender)
+summary(fifa.defender.glm)
+```
+
+Model for the midfielder category:
+
+```{r echo=FALSE}
+fifa.midfielder.glm <- glm(bin ~ PC1 + PC2 + PC3 , family = binomial(link="logit"), data = fifa.train.midfielder)
+summary(fifa.midfielder.glm)
+```
+
+Model for the striker category:
+
+```{r echo=FALSE}
+fifa.striker.glm <- glm(bin ~ PC1 + PC2 + PC3 , family = binomial(link="logit"), data = fifa.train.striker)
+summary(fifa.striker.glm)
+```
+
+Computing the predictions on the test subset and obtaining the probabilities and posterior classification with the associated confusion matrix:
+
+```{r echo=FALSE}
+fifa.goalkeeper.glm.predictions <- predict(fifa.goalkeeper.glm, type = "response", newdata = fifa.test.goalkeeper)
+
+fifa.defender.glm.predictions <- predict(fifa.defender.glm, type = "response", newdata = fifa.test.defender)
+
+fifa.midfielder.glm.predictions <- predict(fifa.midfielder.glm, type = "response", newdata = fifa.test.midfielder)
+
+fifa.striker.glm.predictions <- predict(fifa.striker.glm, type = "response", newdata = fifa.test.striker)
+
+fifa.glm.predictions <- data.frame(fifa.goalkeeper.glm.predictions, fifa.defender.glm.predictions, fifa.midfielder.glm.predictions, fifa.striker.glm.predictions)
+colnames(fifa.glm.predictions) <- c("Goalkeeper", "Defender", "Midfielder", "Striker")
+
+fifa.glm.y.pred <- colnames(fifa.glm.predictions)[apply(fifa.glm.predictions,1,which.max)]
+
+fifa.glm.predictions <- data.frame(fifa.glm.predictions, fifa.test.y, fifa.glm.y.pred)
+colnames(fifa.glm.predictions) <- c("Goalkeeper", "Defender", "Midfielder", "Striker", "Real", "Pred")
+
+confusionMatrix(fifa.glm.predictions[,5], fifa.glm.predictions[,6])
+```
+
+#### 5.2.2 Bayesian approach 
+
+In bayesian logistic regression, we start with an initial belief about the distribution of $p(\beta_{0}, \beta_{1}, \beta_{2}, ..., \beta_{n})$. Then $p(\beta_{0}, \beta_{1}, \beta_{2}, ..., \beta_{n} | x,y)$ is proportional to $p(y | \beta_{0}, \beta_{1}, \beta_{2}, ..., \beta_{n},x)*p(\beta_{0}, \beta_{1}, \beta_{2}, ..., \beta_{n})$. That is, the posterior, which is our updated belief about the weights given evidence, is proportional to our prior (initial belief) times the likelihood. We cannot evaluate the closed form posterior, but can approximate it by sampling or variational methods. This gives us a distribution over the weights.
+
+Model for the goalkeeper category:
+```{r echo=FALSE}
+fifa.goalkeeper.logit <- MCMClogit(bin ~ PC1 + PC2 + PC3, data = fifa.train.goalkeeper)
+summary(fifa.goalkeeper.logit, trace=TRUE, density=TRUE, auto.layout=FALSE)
+plot(fifa.goalkeeper.logit)
+fifa.goalkeeper.logit.coefs <- c(-14.483, 1.908, 3.623, -6.979)
+fifa.goalkeeper.logit.predictions <- 1 / (1+exp(-(fifa.goalkeeper.logit.coefs[1] + fifa.goalkeeper.logit.coefs[2]*fifa.test["PC1"] + fifa.goalkeeper.logit.coefs[3]*fifa.test["PC2"] + fifa.goalkeeper.logit.coefs[4]*fifa.test["PC3"])))
+```
+
+Model for the defender category:
+
+```{r echo=FALSE}
+fifa.defender.logit <- MCMClogit(bin ~ PC1 + PC2 + PC3, data = fifa.train.defender)
+summary(fifa.defender.logit)
+plot(fifa.defender.logit, trace=TRUE, density=TRUE, auto.layout=FALSE)
+fifa.defender.logit.coefs <- c(-2.338, -1.734, -1.220, 2.637)
+fifa.defender.logit.predictions <- 1 / (1+exp(-(fifa.defender.logit.coefs[1] + fifa.defender.logit.coefs[2]*fifa.test["PC1"] + fifa.defender.logit.coefs[3]*fifa.test["PC2"] + fifa.defender.logit.coefs[4]*fifa.test["PC3"])))
+```
+
+Model for the midfielder category:
+
+```{r echo=FALSE}
+fifa.midfielder.logit <- MCMClogit(bin ~ PC1 + PC2 + PC3, data = fifa.train.midfielder)
+summary(fifa.midfielder.logit)
+plot(fifa.midfielder.logit, trace=TRUE, density=TRUE, auto.layout=FALSE)
+fifa.midfielder.logit.coefs <- c(-1.3255, 0.4357, -0.2522, 0.5160)
+fifa.midfielder.logit.predictions <- 1 / (1+exp(-(fifa.midfielder.logit.coefs[1] + fifa.midfielder.logit.coefs[2]*fifa.test["PC1"] + fifa.midfielder.logit.coefs[3]*fifa.test["PC2"] + fifa.midfielder.logit.coefs[4]*fifa.test["PC3"])))
+```
+
+Model for the striker category:
+
+```{r echo=FALSE}
+fifa.striker.logit <- MCMClogit(bin ~ PC1 + PC2 + PC3, data = fifa.train.striker)
+summary(fifa.striker.logit)
+plot(fifa.striker.logit, trace=TRUE, density=TRUE, auto.layout=FALSE)
+fifa.striker.logit.coefs <- c(-1.5189, 0.6859, -0.1729, -0.8213)
+fifa.striker.logit.predictions <- 1 / (1+exp(-(fifa.striker.logit.coefs[1] + fifa.striker.logit.coefs[2]*fifa.test["PC1"] + fifa.striker.logit.coefs[3]*fifa.test["PC2"] + fifa.striker.logit.coefs[4]*fifa.test["PC3"])))
+```
+
+Computing the predictions on the test subset and obtaining the probabilities and posterior classification with the associated confusion matrix:
+
+```{r echo=FALSE}
+fifa.logit.predictions <- data.frame(fifa.goalkeeper.logit.predictions, fifa.defender.logit.predictions, fifa.midfielder.logit.predictions, fifa.striker.logit.predictions)
+colnames(fifa.logit.predictions) <- c("Goalkeeper", "Defender", "Midfielder", "Striker")
+
+fifa.logit.y.pred <- colnames(fifa.logit.predictions)[apply(fifa.logit.predictions,1,which.max)]
+
+fifa.logit.predictions <- data.frame(fifa.logit.predictions, fifa.test.y, fifa.logit.y.pred)
+colnames(fifa.logit.predictions) <- c("Goalkeeper", "Defender", "Midfielder", "Striker", "Real", "Pred")
+
+confusionMatrix(fifa.logit.predictions[,5], fifa.logit.predictions[,6])
+```
+
+<br />
+
+### 5.3 Probit regression
+
+Suppose we have N independent binary random variables $y_{i}={0,1}$ where each $y_{i}$ comes from a Bernoulli distribution with probability of success $p_{i}$. We also assume that the success probability $p_{i}$ is related to a vector of covariates $x_{i}=(x_{i1},...,x_{1D})$. Then, we define the binary regression model as $p_{i}=g^{-1}(x_{i}\theta)$, where $\theta$ represents a $(D×1)$ column vector of regression coefficients, and $g^{-1}(·)$ is the link function. The probit model is obtained if we define $g^{-1}(·)=\phi(·)$, where $\phi(·)$ denotes the cumulative distribution function (cdf) of the standard normal distribution.
+
+Model for the goalkeeper category, and plot of the probabilities according to the different values of PC1 and PC2:
+
+```{r echo=FALSE}
+fifa.goalkeeper.probit <- zelig(bin ~ PC1 + PC2 + PC3, model = "probit.bayes", data = fifa.train.goalkeeper)
+summary(fifa.goalkeeper.probit)
+fifa.goalkeeper.probit.z.out <- fifa.goalkeeper.probit
+fifa.goalkeeper.probit.x.PC1 <- setx(fifa.goalkeeper.probit.z.out, PC1 = -7:6)
+fifa.goalkeeper.probit.x.PC2 <- setx(fifa.goalkeeper.probit.z.out, PC2 = -7:6)
+fifa.goalkeeper.probit.x.PC3 <- setx(fifa.goalkeeper.probit.z.out, PC3 = -7:6)
+fifa.goalkeeper.probit.s.out <- sim(fifa.goalkeeper.probit.z.out, x = fifa.goalkeeper.probit.x.PC1, x1 = fifa.goalkeeper.probit.x.PC2, x2 = fifa.goalkeeper.probit.x.PC3)
+plot(fifa.goalkeeper.probit.s.out, qi = "ev", xlab = "PCx", ylab = "Probability goalkeeper")
+legend("topleft", legend=c("PC1", "PC2"), col=c("darkslategray3", "darksalmon"), lty=1, cex=0.8)
+```
+
+Model for the defender category, and plot of the probabilities according to the different values of PC1 and PC2:
+
+```{r echo=FALSE}
+fifa.defender.probit <- zelig(bin ~ PC1 + PC2 + PC3, model = "probit.bayes", data = fifa.train.defender)
+summary(fifa.defender.probit)
+fifa.defender.probit.z.out <- fifa.defender.probit
+fifa.defender.probit.x.PC1 <- setx(fifa.defender.probit.z.out, PC1 = -7:6)
+fifa.defender.probit.x.PC2 <- setx(fifa.defender.probit.z.out, PC2 = -7:6)
+fifa.defender.probit.x.PC3 <- setx(fifa.defender.probit.z.out, PC3 = -7:6)
+fifa.defender.probit.s.out <- sim(fifa.defender.probit.z.out, x = fifa.defender.probit.x.PC1, x1 = fifa.defender.probit.x.PC2, x2 = fifa.defender.probit.x.PC3)
+plot(fifa.defender.probit.s.out, qi = "ev", xlab = "PCx", ylab = "Probability defender")
+legend("topleft", legend=c("PC1", "PC2"), col=c("darkslategray3", "darksalmon"), lty=1, cex=0.8)
+```
+
+Model for the midfielder category, and plot of the probabilities according to the different values of PC1 and PC2:
+
+```{r echo=FALSE}
+fifa.midfielder.probit <- zelig(bin ~ PC1 + PC2 + PC3, model = "probit.bayes", data = fifa.train.midfielder)
+summary(fifa.midfielder.probit)
+fifa.midfielder.probit.z.out <- fifa.midfielder.probit
+fifa.midfielder.probit.x.PC1 <- setx(fifa.midfielder.probit.z.out, PC1 = -7:6)
+fifa.midfielder.probit.x.PC2 <- setx(fifa.midfielder.probit.z.out, PC2 = -7:6)
+fifa.midfielder.probit.x.PC3 <- setx(fifa.midfielder.probit.z.out, PC3 = -7:6)
+fifa.midfielder.probit.s.out <- sim(fifa.midfielder.probit.z.out, x = fifa.midfielder.probit.x.PC1, x1 = fifa.midfielder.probit.x.PC2, x2 = fifa.midfielder.probit.x.PC3)
+plot(fifa.midfielder.probit.s.out, qi = "ev", xlab = "PCx", ylab = "Probability midfielder")
+legend("topleft", legend=c("PC1", "PC2"), col=c("darkslategray3", "darksalmon"), lty=1, cex=0.8)
+```
+
+Model for the striker category, and plot of the probabilities according to the different values of PC1 and PC2:
+
+```{r echo=FALSE}
+fifa.striker.probit <- zelig(bin ~ PC1 + PC2 + PC3, model = "probit.bayes", data = fifa.train.striker)
+summary(fifa.striker.probit)
+fifa.striker.probit.z.out <- fifa.striker.probit
+fifa.striker.probit.x.PC1 <- setx(fifa.striker.probit.z.out, PC1 = -7:6)
+fifa.striker.probit.x.PC2 <- setx(fifa.striker.probit.z.out, PC2 = -7:6)
+fifa.striker.probit.x.PC3 <- setx(fifa.striker.probit.z.out, PC3 = -7:6)
+fifa.striker.probit.s.out <- sim(fifa.striker.probit.z.out, x = fifa.striker.probit.x.PC1, x1 = fifa.striker.probit.x.PC2, x2 = fifa.striker.probit.x.PC3)
+plot(fifa.striker.probit.s.out, qi = "ev", xlab = "PCx", ylab = "Probability striker")
+legend("topleft", legend=c("PC1", "PC2"), col=c("darkslategray3", "darksalmon"), lty=1, cex=0.8)
+```
+
+<br />
+
+### 5.4. Methods based on the Bayes Theorem
+
+#### 5.4.1. Naïve Bayes
+
+In this case, in spite of using the same method which was studied in Bayesian Learning lectures, by taking into account the attribute nature, the approach of the method is different. This is in this way because, when it was exposed, the explained example counted with categorical variables, that is, if a concrete word appears or not in the tweet. Nevertheless, the presence of quantitative variables in FIFA problem means that Bayes Theorem can not be applied directly in the method from a frequentist approach.
+As an alternative of the studied approach in which the Bayes Theorem was used in order to determine conditional probabilities, in the case of quantitative attributes what is used is probability density functions(pdf). Therefore, pdf is estimated for every attribute and they will be used in the Naïve Bayes formula to obtain the corresponding probailities.
+With the aim of understanding the approach change in the Naïve Bayes method, the difference is explained in the following formulas:
+$$Pr(y=j|x=x_{0})=\frac{Pr(x=x_{0}|y=j)Pr(y=j)}{\sum_{g=1}^{J}Pr(x=x_{0}|y=g)Pr(y=g)}$$
+where j is the class whose probability is computed, and
+$$Pr(y=j|x=x_{0})=\frac{\pi_{j}f_{j}(x_{0})}{\sum_{g=1}^{J}\pi_{g}f_{g}(x_{0})}$$
+where $\pi_{j}$ is the probability (prior probability) that a randomly chosen observation of x comes from the j-th class, and $f_{j}(x_{0})$ is the joint density function of x in the j-th class evaluated at $x_{0}$.
+As it can be observed, both formulas are analogous but they are adapted to one of the mentioned cases.
+In addtition, there are some points which are important to consider. Naïve Bayes method belongs to methods known as "Methods based on the Bayes Theorem". These methods use the previous formula in order to determine the probability of belonging to one class. Working with the standard approach of this type of methods, they use Multivariate Gaussian densities when try to estimate the density functions $f_{j}(x)$, in other words, the mean and the covariance matrices of each class density function.
+In particular, whereas other Methods based on the Bayes Theorem, such as Linear Discriminant Analysis or Quadratic Discriminant Analysis estimate mean vectors and covariance matrices, Naïve Bayes method considers that the predictors are independent what reduces substantially the computation cost. Further more, the independence assumptions is correct in this case considering that a previous Principal Component Analysis has been performed.
+
+```{r NaiveBayes1}
+fifa.bayes.fre <- naiveBayes(fifa.train.def[, 1:3], as.factor(fifa.train.def[, 4]))
+
+fifa.test.predictions.fre <- predict(fifa.bayes.fre, newdata=fifa.test.def[,1:3])
+confusionMatrix(fifa.test.predictions.fre, fifa.test.def$position)
+```
+
+By following the previous explanation, it is showed how to use the Naïve Bayes method in R and the accuracy of the method is 71.42%. If the classification is studied class by class, the 82.43% of defenders, 86.62% of goalkeepers, 51.22% of midfielders and 68.40% of strikers are correctly classified. These results seem to make sense because of the difficulties of classified some midfielders taking into account that many of them have qualities very similar to strikers or defenders. In addition, the shooting, dribbling and defense abilities are not so distinct between goalkeepers and strikers, what can provoke wrong classifications between both groups.
+Finally, in the following chunk of code is tried the Laplacian smoothing which is equivalent to uniform priors. Notice that the results are exactly the same as the previous ones because the use of quantitative attributes is automatically translated in this approach when R perform the Naïve Bayes.
+
+```{r NaiveBayes2}
+fifa.bayes.laplacian <- naiveBayes(fifa.train.def[, 1:3], as.factor(fifa.train.def[, 4]), laplace=1)
+fifa.test.predictions.laplacian <- predict(fifa.bayes.laplacian, newdata=fifa.test.def[,1:3])
+
+confusionMatrix(fifa.test.predictions.laplacian, fifa.test.def$position)
+```
+
+An alternative in order to be able to use a pure frequentist approach could be to distrize the quantitative variables. For example, by knowing that their values are between 0 and 100, these values could have been classified as high, medium and low depending regarding to a predefined criterion. Nevertheless, this method would be subjective.
+
+#### 5.4.2. Linear Discriminant Analysis
+
+Belonging to the groups of methods which are based on Bayes Theorem, its filosophy is very similar to Naïve Bayes method. In this way, LDA takes the assumption of having $f_{1}(x_{0}),...,f_{J}(x_{0})$ as multivariate Gaussians with different mean vectors $\mu_{1},...,\mu_{J}$ and common covariance matrix $\Sigma$. Therefore:
+
+$$f_{j}(x_{})=(2\pi)^{-p/2}|\Sigma|^{-1/2}exp(-\frac{(x-\mu_{j})´\Sigma^{-1}(x-\mu_{j})}{2})$$
+
+and
+
+$$Pr(y=j|x=x_{0})=\frac{\pi_{j}exp(-\frac{(x-\mu_{j})´\Sigma^{-1}(x_{0}-\mu_{j})}{2})}{\sum_{g=1}^{J}\pi_{g}exp(-\frac{(x_{0}-\mu_{g})´\Sigma^{-1}(x_{0}-\mu_{g})}{2})}$$
+
+Obviously, covariance matrix and mean vectors are estimated from the data. If the expression is observed, the denominator is the same for all $j$, so the classified class only depends on the prior distribution and the Mahalanobis distance between $x_{0}$ and $\mu_{j}$
+
+```{r LinearDiscriminantAnalysis}
+lda.fifa.train <- lda(formula=fifa.train.def$position~., data=fifa.train.def)
+lda.fifa.pred <- predict(lda.fifa.train, newdata=fifa.test.def[,1:3])
+
+confusionMatrix(fifa.test.def$position, lda.fifa.pred$class)
+```
+
+In this case, the model accuracy tested in the test set is 79.20%, with a correct rate of 89.08 in defenders, 91.30% in goalkeepers, 55.75% in midfielders and 82.97%.
+Notice how, although the variables of PCA are not gaussian, the predictions are better than the Naïve model, while the most difficult position to estimate is midfielder again.
+
+#### 5.4.3. Quadratic Discriminant Analysis
+
+The assumptions are the same as the ones of Linear Discriminant Analysis. Nevertheless, there is an important modification in the moment of estimate the multivariate Gaussian distributions, considering that although the mean vectors are $\mu_{1},...,\mu_{J}$, now the covariance matrices are different between the functions, $\Sigma_{1},...,\Sigma_{J}$.
+Notice that, in spite of the change in the covatiance matrices, the denominator is the same for each probability.
+
+```{r QuadraticDiscriminantAnalysis}
+qda.fifa.train <- qda(fifa.train.def$position ~ ., data=fifa.train.def)
+qda.fifa.pred <- predict(qda.fifa.train, newdata=fifa.test.def[,1:3])
+
+confusionMatrix(qda.fifa.pred$class, fifa.test.def$position)
+```
+
+Finally, this model is the best of the three corresponding to the Bayes Theorem, with an accuracy of 80.44%. Again, studying each class separately: 91.14% in defenders, 92.89% in goalkeepers, 54.18% in midfielders and 85.74% in strikers.
+
+<br />
+
+<br />
+
+# 6. Conclusions
+
+Throughout the development of this work, a dataset with thousands of male football players characterized by attributes such as their dribbling or shooting abilities. In addition, they are labelled with the position where they usually play: goalkeeper, defender, midfielder or striker. The goal of this study is to first, explore the dataset, understand its main features through a descriptive analysis and an unsupervised classification; and then to try to classify each football player by its position. 
+
+From the descriptive analysis one should remark how most features do not clearly discriminate among the four classes (except for goalkeeper ability, of course); their distributions are mostly overlapped. To reduce the number of features while still capturing most of the information, a Principal Component Analysis was performed. It allowed to maintain information from most of the features, while reducing the computational time and power required, which is a must since the whole code takes longer than an hour to run on our personal laptops. 3 Principal Components were chosen, and they explain most of the variance. The first one agglutinates information about defence, physical conditions, weight and height; the second focuses mainly on goalkeeper abilities and the third one on defensive and physical abilities. 
+
+With the new feature space, an unsupervised analysis (finite mixture of gaussians) was performed using 2, 3 and 4 distributions. What was found is that, despite specifying 3 or 4 distributions, they appear to overlap in univariate and bivariate plots. The Principal Component in which less overlapped distributions were observed was the third one, which groups info about defense and physical abilities. In addition, goalkeepers and strikers were sometimes found in the same clusters (their height and weight is similar and that is what the first PC is talking about). Defenders are in most cases identified well, but this does not happen for midfielders. It is the most heterogeneous group, with players of very different profiles and they are sometimes confused with strikers and defenders. These conclusions advance some of the obstacles that classification algorithm faced in the next phases of this project: midfielder is not a sufficiently narrow label and therefore it is complicated to classify them; when confused, goalkeepers are confused with strikers; and defenders and strikers are clearly two different types of players. 
+
+For classification, different algorithms were tested: Gaussian Processes, Logistic Regression, Probit Regression, Naive Bayes, Linear Discriminant Analysis and Quadratic Discriminant Analysis. For some of them, such as Logistic Regression, both a frequentist and a bayesian approach were tested, and their results compared. As a general remark, very similar accuracies, sensitivities and sensibilities were obtained and the frequentist approach was faster to compute. The main advantage of bayesian methods, their built-in uncertainty treatment, was not a vital advantage for these final metrics. However, it could make a difference when using these methods for a final product implementation, where the uncertainty of the results needs to be taken into consideration very seriously. 
+
+Gaussian Processes, Logistic and Probit Regression share the same approach towards classification. The three of them are originally pure regression algorithms, but by using a link function they may be used for classification, as it is done in this project. As a general remark, turns out that Gaussian Processes outperform the other two algorithms: they are better at correctly classifying a goalkeeper as goalkeeper and at correctly saying that another type of player is not a goalkeeper (sensitivity and sensibility are higher). And that for all classes. The fact that the second PC focuses on goalkeeper abilities is clearly observed in the line plots of the Probit Regression. In them, it is undoubtfully observed how increasing the value of PC2, the probability of classifying an instance as goalkeeper increases dramatically. Interestingly, the probability of classifying an instance as midfielder or striker increasing when the value of PC1 increases, but the probability of being a defender decreases. Recall that this first component was negatively influenced by defensive abilities. 
+
+The other three methods (Naive Bayes, Linear Discriminant Analysis and Quadratic Discriminant Analysis) are pure Bayesian methods (perhaps Gaussian Processes should also be put in this category), not as Logistic and Probit Regression, which may be approached from a bayesian or from a frequentist perspective. LDA and QDA assume gaussianity and despite the Principal Components are not gaussian, the algorithms have been tried. From the three of them, QDA has the highest metrics (80% of accuracy, for instance). This may be due that, despite it is assuming gaussianity, since it allows for different covariance matrices for each estimated function, it has more flexibility to adapt to the Fifa dataset used in this report. 
+
+As a general remark from all classification algorithms, it is easier to classify goalkeepers and with high confidence (there is a whole feature that measures goalkeeper abilities and it is very significative in one of the principal components). Also, midfielders are the most complicated to classify, since they are very heterogeneous. Finally, goalkeepers are sometimes confused with strikers (when they are misclassified, which does not happen often) and defenders with midfielders. All these limitations were anticipated by the unsupervised analysis.
