@@ -13,6 +13,9 @@ The project is a complete analysis of the Fifa dataset (https://www.kaggle.com/k
 5. Bayesian classification: Naive Bayes, Logistic Regression (and comparison with frequentist approach), Probit Regression, Gaussian Processes, Linear Discriminant Analysis and Quadratic Discriminant Analysis.
 6. Conclusions.
 
+Not only code but also theory about the algorithms used is provided.
+
+
 R version 3.5.1
 
 Packages: 
